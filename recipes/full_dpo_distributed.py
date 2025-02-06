@@ -293,7 +293,7 @@ class FullDPORecipeDistributed(FTRecipeInterface):
             optimizer_in_bwd=self._optimizer_in_bwd,
             opt_state_dict=(
                 checkpoint_dict[training.OPT_KEY]
-                if self._resume_from_checkpoint
+                if training.OPT_KEY in checkpoint_dict
                 else None
             ),
         )
@@ -627,7 +627,7 @@ class FullDPORecipeDistributed(FTRecipeInterface):
                     try:
                         training.load_from_full_optimizer_state_dict(
                             self._model,
-                            self._optim_ckpt_wrapper.state_dict()[param],
+                            self._optim_ckpt_wrapper.optim_map[param],
                             opt_state_dict[param],
                             self._device,
                         )
@@ -949,7 +949,7 @@ class FullDPORecipeDistributed(FTRecipeInterface):
 
                 del reference_chosen_logits, reference_rejected_logits
 
-                loss, chosen_rewards, rejected_rewards = self._loss_fn(
+                current_loss, chosen_rewards, rejected_rewards = self._loss_fn(
                     policy_chosen_log_probs,
                     policy_rejected_log_probs,
                     reference_chosen_log_probs,
@@ -957,12 +957,12 @@ class FullDPORecipeDistributed(FTRecipeInterface):
                 )
                 reward_accuracies = (chosen_rewards > rejected_rewards).float()
 
-                loss = loss.mean()
+                current_loss = current_loss.mean()
 
-                loss = loss / self._gradient_accumulation_steps
+                current_loss = current_loss / self._gradient_accumulation_steps
 
                 # Update running metrics
-                running_loss += loss
+                running_loss += current_loss
                 scaling_factor = (
                     1 / self._gradient_accumulation_steps
                 )  # to average out between grad_acc steps
@@ -1002,7 +1002,7 @@ class FullDPORecipeDistributed(FTRecipeInterface):
                     # We multiply by world_size to undo FSDP2 gradient normalization.
                     current_loss = current_loss * (world_size / num_tokens)
 
-                loss.backward()
+                current_loss.backward()
 
                 # Step with optimizer
                 if (idx + 1) % self._gradient_accumulation_steps == 0:
